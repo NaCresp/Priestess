@@ -7,10 +7,6 @@ from langchain_core.runnables import RunnablePassthrough
 from dotenv import load_dotenv
 
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
-BASE_URL = os.getenv("BASE_URL")
-DB_PATH = "./chroma_db"
-EMBEDDING_MODEL = "BAAI/bge-m3"
 
 PERSONA_PROMPT = """
 你现在是 普瑞赛斯。
@@ -37,32 +33,43 @@ PERSONA_PROMPT = """
 
 博士的请求：{question}
 """
-def main():
-    if not os.path.exists(DB_PATH):
-        print("错误：找不到数据库！请先运行 'python ingest.py' 导入课件。")
-        return
 
-    print("普瑞赛斯睁开了双眼...")
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-    
-    vectorstore = Chroma(
-        persist_directory=DB_PATH, 
-        embedding_function=embeddings
-    )
-    
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+class PriestessAI:
+    def __init__(self):
+        self.api_key = os.getenv("API_KEY")
+        self.base_url = os.getenv("BASE_URL")
+        self.db_path = "./chroma_db"
+        self.embedding_model = "BAAI/bge-m3"
+        self.llm = None
+        self.retriever = None
+        self.prompt = ChatPromptTemplate.from_template(PERSONA_PROMPT)
+        self.init_components()
 
-    llm = ChatOpenAI(
-        api_key=API_KEY, 
-        base_url=BASE_URL,
-        model="qwen-flash", 
-        temperature=0.3,
-        streaming=True
-    )
+    def init_components(self):
+        if not os.path.exists(self.db_path):
+            print("错误：找不到数据库！请先运行 'python ingest.py' 导入课件。")
+            return
 
-    prompt = ChatPromptTemplate.from_template(PERSONA_PROMPT)
-    
-    def format_docs(docs):
+        print("普瑞赛斯正在唤醒...")
+        embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model)
+        
+        vectorstore = Chroma(
+            persist_directory=self.db_path, 
+            embedding_function=embeddings
+        )
+        
+        self.retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+
+        self.llm = ChatOpenAI(
+            api_key=self.api_key, 
+            base_url=self.base_url,
+            model="qwen-flash", 
+            temperature=0.3,
+            streaming=True
+        )
+        print("普瑞赛斯已就位")
+
+    def format_docs(self, docs):
         context_str = ""
         for doc in docs:
             source = os.path.basename(doc.metadata.get('source', '未知文件'))
@@ -71,28 +78,40 @@ def main():
             context_str += f"--- [来源: {source} 第 {page} 页] ---\n{content}\n"
         return context_str
 
-    print("\n普瑞赛斯已就位")
-    
-    while True:
-        query = input("\n 博士: ")
-        if query.lower() in ['q', 'quit', 'exit']:
-            break
-            
-        retrieved_docs = retriever.invoke(query)
-        context = format_docs(retrieved_docs)
+    def chat(self, query):
+        if not self.retriever or not self.llm:
+            yield "普瑞赛斯似乎还没准备好..."
+            return
+
+        retrieved_docs = self.retriever.invoke(query)
+        context = self.format_docs(retrieved_docs)
         
-        chain = prompt | llm
-        
-        print("\n 普瑞赛斯: ", end="", flush=True)
+        chain = self.prompt | self.llm
         
         for chunk in chain.stream({
             "context": context, 
             "question": query
         }):
             if chunk.content:
-                print(chunk.content, end="", flush=True)
+                yield chunk.content
+
+def main():
+    ai = PriestessAI()
+    
+    print("普瑞赛斯睁开了双眼...")
+    
+    while True:
+        query = input("\n 博士: ")
+        if query.lower() in ['q', 'quit', 'exit']:
+            break
+            
+        print("\n 普瑞赛斯: ", end="", flush=True)
+        
+        for content in ai.chat(query):
+            print(content, end="", flush=True)
         
         print() 
 
 if __name__ == "__main__":
     main()
+    
