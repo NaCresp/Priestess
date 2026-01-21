@@ -174,14 +174,23 @@ class DesktopPet(QMainWindow):
     
     def openFeed(self):
         pet_rect = self.geometry()
+        screen_rect = QApplication.primaryScreen().geometry()
         feed_width = self.drop_window.width()
         feed_height = self.drop_window.height()
         
         self.drop_window.file_list.clear()
         self.drop_window.label.setText("把文件拖到这里投喂给普瑞赛斯\n\n关闭窗口开始消化")
         
-        x = pet_rect.x() + pet_rect.width() + 20
-        y = pet_rect.y()
+        x = pet_rect.x() + (pet_rect.width() - feed_width) // 2
+        y = pet_rect.y() + pet_rect.height() + 10
+        
+        if x < 0:
+            x = 10
+        elif x + feed_width > screen_rect.width():
+            x = screen_rect.width() - feed_width - 10
+            
+        if y + feed_height > screen_rect.height():
+            y = pet_rect.y() - feed_height - 10
         
         self.drop_window.move(x, y)
         self.drop_window.show()
