@@ -2,10 +2,13 @@ import sys
 import threading
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QMenu, 
                              QAction, QWidget, QVBoxLayout, QTextEdit, 
-                             QLineEdit, QPushButton, QSystemTrayIcon)
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QObject
+                             QLineEdit, QPushButton, QSystemTrayIcon, QListWidget)
+from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QObject, QThread
 from PyQt5.QtGui import QPixmap, QCursor, QIcon
 from main import PriestessAI
+import shutil
+import os
+import subprocess
 
 class ChatWorker(QObject):
     finished = pyqtSignal()
@@ -26,6 +29,7 @@ class ChatWindow(QWidget):
         super().__init__()
         self.ai = ai
         self.setWindowTitle("普瑞赛斯 - 对话")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.resize(400, 500)
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
@@ -77,6 +81,85 @@ class ChatWindow(QWidget):
         self.input_field.setFocus()
 
 
+class IngestionWorker(QThread):
+    finished = pyqtSignal()
+    
+    def run(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(base_dir, 'ingest.py')
+        if os.path.exists(script_path):
+            try:
+                subprocess.run([sys.executable, script_path], check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Ingestion failed: {e}")
+        self.finished.emit()
+
+class DropWindow(QWidget):
+    ingestion_finished = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("投喂 (Feed)")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.resize(300, 300)
+        self.setAcceptDrops(True)
+        
+        self.layout = QVBoxLayout()
+        self.label = QLabel("把文件拖到这里投喂给普瑞赛斯\n(Drag files here)\n\n关闭窗口开始消化")
+        self.label.setAlignment(Qt.AlignCenter)
+        self.layout.addWidget(self.label)
+        
+        self.file_list = QListWidget()
+        self.layout.addWidget(self.file_list)
+        
+        self.setLayout(self.layout)
+        self.worker = None
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        files = [u.toLocalFile() for u in event.mimeData().urls()]
+        
+        # Ensure data directory exists
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(base_dir, 'data')
+        
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        
+        count = 0
+        for f_path in files:
+            if os.path.isfile(f_path):
+                try:
+                    shutil.copy(f_path, data_dir)
+                    file_name = os.path.basename(f_path)
+                    self.file_list.addItem(f"已接收: {file_name}")
+                    count += 1
+                except Exception as e:
+                    print(f"Error copying {f_path}: {e}")
+                    self.file_list.addItem(f"错误: {os.path.basename(f_path)}")
+        
+        self.label.setText(f"本次新增 {count} 个文件\n关闭窗口以开始消化...")
+        self.file_list.scrollToBottom()
+
+    def closeEvent(self, event):
+        if self.file_list.count() > 0:
+            print("Starting ingestion in background...")
+            self.worker = IngestionWorker()
+            self.worker.finished.connect(self.on_ingestion_finished)
+            self.worker.start()
+            
+        event.accept()
+
+    def on_ingestion_finished(self):
+        print("Ingestion finished via thread.")
+        self.ingestion_finished.emit()
+
+
 class DesktopPet(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -85,11 +168,28 @@ class DesktopPet(QMainWindow):
         
         self.initUI()
         self.chat_window = ChatWindow(self.ai)
+        self.drop_window = DropWindow()
+        self.drop_window.ingestion_finished.connect(self.ai.reload_knowledge)
         
         self.drag_position = QPoint()
+    
+    def openFeed(self):
+        pet_rect = self.geometry()
+        feed_width = self.drop_window.width()
+        feed_height = self.drop_window.height()
+        
+        self.drop_window.file_list.clear()
+        self.drop_window.label.setText("把文件拖到这里投喂给普瑞赛斯\n(Drag files here)\n\n关闭窗口开始消化")
+        
+        x = pet_rect.x() + pet_rect.width() + 20
+        y = pet_rect.y()
+        
+        self.drop_window.move(x, y)
+        self.drop_window.show()
+        self.drop_window.activateWindow()
 
     def initUI(self):
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
         self.central_widget = QWidget()
@@ -167,6 +267,10 @@ class DesktopPet(QMainWindow):
         chat_action.triggered.connect(self.openChat)
         menu.addAction(chat_action)
         
+        feed_action = QAction("投喂 (Feed)", self)
+        feed_action.triggered.connect(self.openFeed)
+        menu.addAction(feed_action)
+        
         quit_action = QAction("退出 (Exit)", self)
         quit_action.triggered.connect(QApplication.quit)
         menu.addAction(quit_action)
@@ -201,5 +305,6 @@ class DesktopPet(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     pet = DesktopPet()
     sys.exit(app.exec_())

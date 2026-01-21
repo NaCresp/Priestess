@@ -45,20 +45,15 @@ class PriestessAI:
         self.prompt = ChatPromptTemplate.from_template(PERSONA_PROMPT)
         self.init_components()
 
+
+
     def init_components(self):
+        self.embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model)
+        
         if not os.path.exists(self.db_path):
             print("错误：找不到数据库！请先运行 'python ingest.py' 导入课件。")
-            return
-
-        print("普瑞赛斯正在唤醒...")
-        embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model)
-        
-        vectorstore = Chroma(
-            persist_directory=self.db_path, 
-            embedding_function=embeddings
-        )
-        
-        self.retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        else:
+            self.load_vector_db()
 
         self.llm = ChatOpenAI(
             api_key=self.api_key, 
@@ -68,6 +63,20 @@ class PriestessAI:
             streaming=True
         )
         print("普瑞赛斯已就位")
+
+    def load_vector_db(self):
+        print("普瑞赛斯正在读取记忆...")
+        vectorstore = Chroma(
+            persist_directory=self.db_path, 
+            embedding_function=self.embeddings
+        )
+        self.retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+    
+    def reload_knowledge(self):
+        print("正在热更新记忆库...")
+        self.retriever = None 
+        self.load_vector_db()
+        print("记忆库更新完毕！")
 
     def format_docs(self, docs):
         context_str = ""
