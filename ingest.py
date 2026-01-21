@@ -2,7 +2,7 @@ import os
 import shutil  
 import json
 import glob
-from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
+from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader, TextLoader, UnstructuredMarkdownLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -11,6 +11,13 @@ DATA_PATH = "./data"
 DB_PATH = "./chroma_db"
 PROCESSED_RECORD_PATH = ".processed_files"
 EMBEDDING_MODEL = "BAAI/bge-m3"
+
+LOADERS = {
+    ".pdf": PyPDFLoader,
+    ".txt": TextLoader,
+    ".md": UnstructuredMarkdownLoader,
+    ".py": TextLoader
+}
 
 def load_processed_files():
     if os.path.exists(PROCESSED_RECORD_PATH):
@@ -32,7 +39,12 @@ def create_vector_db():
         return
 
     processed_files = load_processed_files()
-    all_files = set(glob.glob(os.path.join(DATA_PATH, "**/*.pdf"), recursive=True))
+    
+    all_files = []
+    for ext in LOADERS.keys():
+        all_files.extend(glob.glob(os.path.join(DATA_PATH, f"**/*{ext}"), recursive=True))
+    
+    all_files = set(all_files)
     
     all_files_abs = {os.path.abspath(f) for f in all_files}
     processed_files_abs = {os.path.abspath(f) for f in processed_files}
@@ -48,8 +60,13 @@ def create_vector_db():
     docs = []
     for file_path in new_files:
         try:
-            loader = PyPDFLoader(file_path)
-            docs.extend(loader.load())
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in LOADERS:
+                loader_cls = LOADERS[ext]
+                loader = loader_cls(file_path)
+                docs.extend(loader.load())
+            else:
+                print(f"Skipping unsupported file: {file_path}")
         except Exception as e:
             print(f"加载文件 {file_path} 失败: {e}")
 
