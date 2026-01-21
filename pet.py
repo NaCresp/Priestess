@@ -2,7 +2,7 @@ import sys
 import threading
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QMenu, 
                              QAction, QWidget, QVBoxLayout, QTextEdit, 
-                             QLineEdit, QPushButton, QSystemTrayIcon, QListWidget)
+                             QLineEdit, QPushButton, QSystemTrayIcon, QListWidget, QMessageBox)
 from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QObject, QThread
 from PyQt5.QtGui import QPixmap, QCursor, QIcon
 from main import PriestessAI
@@ -99,13 +99,13 @@ class DropWindow(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("投喂 (Feed)")
+        self.setWindowTitle("投喂")
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.resize(300, 300)
         self.setAcceptDrops(True)
         
         self.layout = QVBoxLayout()
-        self.label = QLabel("把文件拖到这里投喂给普瑞赛斯\n(Drag files here)\n\n关闭窗口开始消化")
+        self.label = QLabel("把文件拖到这里投喂给普瑞赛斯\n\n关闭窗口开始消化")
         self.label.setAlignment(Qt.AlignCenter)
         self.layout.addWidget(self.label)
         
@@ -123,8 +123,7 @@ class DropWindow(QWidget):
 
     def dropEvent(self, event):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
-        
-        # Ensure data directory exists
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         data_dir = os.path.join(base_dir, 'data')
         
@@ -179,7 +178,7 @@ class DesktopPet(QMainWindow):
         feed_height = self.drop_window.height()
         
         self.drop_window.file_list.clear()
-        self.drop_window.label.setText("把文件拖到这里投喂给普瑞赛斯\n(Drag files here)\n\n关闭窗口开始消化")
+        self.drop_window.label.setText("把文件拖到这里投喂给普瑞赛斯\n\n关闭窗口开始消化")
         
         x = pet_rect.x() + pet_rect.width() + 20
         y = pet_rect.y()
@@ -263,19 +262,55 @@ class DesktopPet(QMainWindow):
     def showContextMenu(self, pos):
         menu = QMenu(self)
         
-        chat_action = QAction("对话 (Chat)", self)
+        chat_action = QAction("对话", self)
         chat_action.triggered.connect(self.openChat)
         menu.addAction(chat_action)
         
-        feed_action = QAction("投喂 (Feed)", self)
+        feed_action = QAction("投喂", self)
         feed_action.triggered.connect(self.openFeed)
         menu.addAction(feed_action)
         
-        quit_action = QAction("退出 (Exit)", self)
+        clear_action = QAction("清空记忆", self)
+        clear_action.triggered.connect(self.clear_data)
+        menu.addAction(clear_action)
+        
+        quit_action = QAction("退出", self)
         quit_action.triggered.connect(QApplication.quit)
         menu.addAction(quit_action)
         
         menu.exec_(pos)
+        
+    def clear_data(self):
+        reply = QMessageBox.question(self, '确认', 
+                                     "确定要清空所有数据吗？普瑞赛斯将遗忘所有已投喂的知识。",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            data_dir = os.path.join(base_dir, 'data')
+            
+            # Clear data directory
+            if os.path.exists(data_dir):
+                for filename in os.listdir(data_dir):
+                    file_path = os.path.join(data_dir, filename)
+                    try:
+                        if os.path.isfile(file_path) or os.path.islink(file_path):
+                            os.unlink(file_path)
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                    except Exception as e:
+                        print(f"Failed to delete {file_path}. Reason: {e}")
+            
+            print("Data directory cleared. Starting ingestion to reset DB...")
+            
+            self.worker = IngestionWorker()
+            self.worker.finished.connect(self.on_ingestion_finished)
+            self.worker.start()
+            
+    def on_ingestion_finished(self):
+        print("Ingestion (Reset) finished.")
+        self.ai.reload_knowledge()
+        QMessageBox.information(self, "完成", "普瑞赛斯的记忆已重置。")
 
     def openChat(self):
         pet_rect = self.geometry()
