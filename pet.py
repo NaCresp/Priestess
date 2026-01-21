@@ -297,8 +297,7 @@ class DesktopPet(QMainWindow):
         if reply == QMessageBox.Yes:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             data_dir = os.path.join(base_dir, 'data')
-            
-            # Clear data directory
+
             if os.path.exists(data_dir):
                 for filename in os.listdir(data_dir):
                     file_path = os.path.join(data_dir, filename)
@@ -310,7 +309,15 @@ class DesktopPet(QMainWindow):
                     except Exception as e:
                         print(f"Failed to delete {file_path}. Reason: {e}")
             
-            print("Data directory cleared. Starting ingestion to reset DB...")
+            db_path = os.path.join(base_dir, 'chroma_db')
+            if os.path.exists(db_path):
+                shutil.rmtree(db_path)
+                
+            processed_record = os.path.join(base_dir, '.processed_files')
+            if os.path.exists(processed_record):
+                os.remove(processed_record)
+            
+            print("Data and memory cleared. Starting ingestion to reset state...")
             
             self.worker = IngestionWorker()
             self.worker.finished.connect(self.on_ingestion_finished)
