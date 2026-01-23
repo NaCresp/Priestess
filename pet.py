@@ -9,6 +9,7 @@ from main import PriestessAI
 import shutil
 import os
 import subprocess
+from text_renderer import process_text_with_formulas
 
 class ChatWorker(QObject):
     finished = pyqtSignal()
@@ -48,6 +49,7 @@ class ChatWindow(QWidget):
         self.layout.addWidget(self.send_btn)
         
         self.current_worker = None
+        self.current_response_text = ""
 
     def send_message(self):
         user_input = self.input_field.text().strip()
@@ -59,6 +61,7 @@ class ChatWindow(QWidget):
         self.input_field.setDisabled(True)
 
         self.history_display.append("<b>普瑞赛斯:</b> ")
+        self.current_response_text = ""
 
         self.worker = ChatWorker(self.ai, user_input)
         
@@ -69,6 +72,7 @@ class ChatWindow(QWidget):
         self.worker_thread.start()
 
     def update_response(self, text):
+        self.current_response_text += text
         cursor = self.history_display.textCursor()
         cursor.movePosition(cursor.End)
         cursor.insertText(text)
@@ -76,6 +80,18 @@ class ChatWindow(QWidget):
         self.history_display.ensureCursorVisible()
 
     def enable_input(self):
+        # Replace the raw streaming text with the processed HTML (with rendered formulas)
+        cursor = self.history_display.textCursor()
+        cursor.movePosition(cursor.End)
+        # Select the length of the text we just streamed
+        # Note: We assume the cursor is at the end and the streaming text is the last thing added.
+        cursor.movePosition(cursor.Left, cursor.KeepAnchor, len(self.current_response_text))
+        cursor.removeSelectedText()
+        
+        # Process and insert HTML
+        processed_html = process_text_with_formulas(self.current_response_text)
+        cursor.insertHtml(processed_html)
+        
         self.history_display.append("\n")
         self.input_field.setDisabled(False)
         self.input_field.setFocus()
